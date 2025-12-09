@@ -1,8 +1,8 @@
 {
   "name": "electron",
-  "productName": "Electron Test",
+  "productName": "Electron Recorder App",
   "version": "1.0.0",
-  "description": "For Learning Purpose Only",
+  "description": "A desktop application built using Electron that supports audio recording and combined screen + audio capture",
   "main": "main.js",
   "scripts": {
     "start": "electron ."
