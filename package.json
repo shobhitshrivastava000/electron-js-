@@ -1,0 +1,18 @@
+{
+  "name": "electron",
+  "productName": "Electron Test",
+  "version": "1.0.0",
+  "description": "For Learning Purpose Only",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "Krushita gajera",
+  "license": "MIT",
+  "dependencies": {
+    "electron-audio-loopback": "^1.0.6"
+  },
+  "devDependencies": {
+    "electron": "^39.2.5"
+  }
+}
