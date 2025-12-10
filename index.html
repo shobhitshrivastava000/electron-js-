@@ -1,165 +1,169 @@
 <!DOCTYPE html>
 <html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="script-src 'self' 'unsafe-inline'"
+    />
+    <title>Audio & Screen Recorder</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 0;
+        background: #212121;
+        color: white;
+      }
 
-<head>
-  <meta charset="UTF-8">
-  <meta
-    http-equiv="Content-Security-Policy"
-    content="script-src 'self' 'unsafe-inline'"
-  />
-  <title>Audio & Screen Recorder</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      margin: 0;
-      padding: 0;
-      background: #212121;
-      color: white;
-    }
+      .container {
+        max-width: 600px;
+        margin: 32px auto;
+        padding: 0 24px;
+      }
 
-    .container {
-      max-width: 600px;
-      margin: 32px auto;
-      padding: 0 24px;
-    }
+      h1 {
+        font-size: 1.8em;
+        margin: 24px 0 16px 0;
+        color: rgba(255, 255, 255, 0.9);
+      }
 
-    h1 {
-      font-size: 1.8em;
-      margin: 24px 0 16px 0;
-      color: rgba(255, 255, 255, 0.9);
-    }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
 
-    .controls {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-bottom: 24px;
-    }
+      button,
+      select {
+        font-size: 1em;
+        padding: 10px 16px;
+        background-color: rgba(255, 255, 255, 0.1);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
 
-    button,
-    select {
-      font-size: 1em;
-      padding: 10px 16px;
-      background-color: rgba(255, 255, 255, 0.1);
-      color: white;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 6px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
+      button:hover:not(:disabled) {
+        background-color: rgba(255, 255, 255, 0.15);
+      }
 
-    button:hover:not(:disabled) {
-      background-color: rgba(255, 255, 255, 0.15);
-    }
+      button:disabled,
+      select:disabled {
+        background-color: rgba(255, 255, 255, 0.05);
+        color: rgba(255, 255, 255, 0.4);
+        border-color: rgba(255, 255, 255, 0.05);
+        cursor: not-allowed;
+      }
 
-    button:disabled,
-    select:disabled {
-      background-color: rgba(255, 255, 255, 0.05);
-      color: rgba(255, 255, 255, 0.4);
-      border-color: rgba(255, 255, 255, 0.05);
-      cursor: not-allowed;
-    }
+      select {
+        min-width: 200px;
+      }
 
-    select {
-      min-width: 200px;
-    }
+      select option {
+        background-color: #2a2a2a;
+        color: white;
+      }
 
-    select option {
-      background-color: #2a2a2a;
-      color: white;
-    }
+      .status-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
 
-    .status-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 24px;
-    }
+      .status {
+        padding: 12px;
+        font-size: 0.9em;
+        border-radius: 6px;
+        text-align: center;
+        transition: all 0.3s ease;
+      }
 
-    .status {
-      padding: 12px;
-      font-size: 0.9em;
-      border-radius: 6px;
-      text-align: center;
-      transition: all 0.3s ease;
-    }
+      .status.connected {
+        background-color: rgba(76, 175, 80, 0.3);
+        border: 1px solid rgba(76, 175, 80, 0.5);
+        color: #81c784;
+      }
 
-    .status.connected {
-      background-color: rgba(76, 175, 80, 0.3);
-      border: 1px solid rgba(76, 175, 80, 0.5);
-      color: #81c784;
-    }
+      .status.disconnected {
+        background-color: rgba(244, 67, 54, 0.2);
+        border: 1px solid rgba(244, 67, 54, 0.3);
+        color: #e57373;
+      }
 
-    .status.disconnected {
-      background-color: rgba(244, 67, 54, 0.2);
-      border: 1px solid rgba(244, 67, 54, 0.3);
-      color: #e57373;
-    }
+      .info-box {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 16px;
+        margin-top: 24px;
+      }
 
-    .info-box {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
-      padding: 16px;
-      margin-top: 24px;
-    }
+      .info-box h3 {
+        margin: 0 0 12px 0;
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 1.1em;
+      }
 
-    .info-box h3 {
-      margin: 0 0 12px 0;
-      color: rgba(255, 255, 255, 0.8);
-      font-size: 1.1em;
-    }
+      .info-box ol {
+        margin: 0;
+        padding-left: 24px;
+        line-height: 1.8;
+        color: rgba(255, 255, 255, 0.7);
+      }
 
-    .info-box ol {
-      margin: 0;
-      padding-left: 24px;
-      line-height: 1.8;
-      color: rgba(255, 255, 255, 0.7);
-    }
+      .info-box li {
+        margin-bottom: 8px;
+      }
+    </style>
+  </head>
 
-    .info-box li {
-      margin-bottom: 8px;
-    }
-  </style>
-</head>
+  <body>
+    <div class="container">
+      <h1>🎙️🎥 Audio & Screen Recorder</h1>
 
-<body>
-  <div class="container">
-    <h1>🎙️🎥 Audio & Screen Recorder</h1>
+      <div class="controls">
+        <select id="recordingMode">
+          <option value="audio">Audio Only</option>
+          <option value="screen">Audio + Screen</option>
+        </select>
+        <select id="micSelect"></select>
+        <select id="screenSelect" style="display: none"></select>
+        <button id="startBtn" type="button">Start Streams</button>
+        <button id="stopBtn" type="button" disabled>Stop Streams</button>
+        <button id="recordBtn" type="button" disabled>Start Recording</button>
+      </div>
 
-    <div class="controls">
-      <select id="recordingMode">
-        <option value="audio">Audio Only</option>
-        <option value="screen">Audio + Screen</option>
-      </select>
-      <select id="micSelect"></select>
-      <select id="screenSelect" style="display: none;"></select>
-      <button id="startBtn" type="button">Start Streams</button>
-      <button id="stopBtn" type="button" disabled>Stop Streams</button>
-      <button id="recordBtn" type="button" disabled>Start Recording</button>
+      <div class="status-grid">
+        <div id="micStatus" class="status disconnected">
+          Microphone: Disconnected
+        </div>
+        <div id="speakerStatus" class="status disconnected">
+          Screen/Audio: Disconnected
+        </div>
+        <div id="recordStatus" class="status disconnected">
+          Recording: Stopped
+        </div>
+      </div>
+
+      <div class="info-box">
+        <h3>📝 How to use:</h3>
+        <ol>
+          <li>Select recording mode (Audio Only or Audio + Screen)</li>
+          <li>Select your microphone from the dropdown</li>
+          <li>If using Audio + Screen mode, select screen source</li>
+          <li>Click "Start Streams" and allow permissions</li>
+          <li>Click "Start Recording" to begin recording</li>
+          <li>Click "Stop Recording" when done</li>
+          <li>Files are saved to <code>./recordings/</code> folder</li>
+        </ol>
+      </div>
     </div>
 
-    <div class="status-grid">
-      <div id="micStatus" class="status disconnected">Microphone: Disconnected</div>
-      <div id="speakerStatus" class="status disconnected">Screen/Audio: Disconnected</div>
-      <div id="recordStatus" class="status disconnected">Recording: Stopped</div>
-    </div>
-
-    <div class="info-box">
-      <h3>📝 How to use:</h3>
-      <ol>
-        <li>Select recording mode (Audio Only or Audio + Screen)</li>
-        <li>Select your microphone from the dropdown</li>
-        <li>If using Audio + Screen mode, select screen source</li>
-        <li>Click "Start Streams" and allow permissions</li>
-        <li>Click "Start Recording" to begin recording</li>
-        <li>Click "Stop Recording" when done</li>
-        <li>Files are saved to <code>./recordings/</code> folder</li>
-      </ol>
-    </div>
-  </div>
-
-  <script src="./renderer.js"></script>
-</body>
-
+    <script src="./renderer.js"></script>
+  </body>
 </html>
