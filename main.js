@@ -41,8 +41,8 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Create recordings directory if it doesn't exist
-  const recordingsDir = path.join(__dirname, 'recordings');
+  // Create recordings directory in user's Downloads folder
+  const recordingsDir = path.join(app.getPath('downloads'), 'ElectronRecordings');
   if (!fs.existsSync(recordingsDir)) {
     fs.mkdirSync(recordingsDir, { recursive: true });
   }
@@ -62,7 +62,7 @@ app.on('window-all-closed', function () {
 // Handle save recording request
 ipcMain.on("save-recording", async (event, audioData, filename) => {
   try {
-    const recordingsDir = path.join(__dirname, "recordings");
+    const recordingsDir = path.join(app.getPath('downloads'), "ElectronRecordings");
 
     const encryptedDir = path.join(recordingsDir, "encrypted");
     const decryptedDir = path.join(recordingsDir, "decrypted");
