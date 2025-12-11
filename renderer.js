@@ -5,12 +5,23 @@ class ScreenRecorder {
     this.isRecording = false;
     this.combinedStream = null;
     this.audioContext = null;
+    this.chunkInterval = null;
+    this.chunkNumber = 0;
+    this.recordingStartTime = null;
+    this.microphoneStream = null;
+    this.systemAudioStream = null;
+    this.videoStream = null;
   }
 
   async startRecording(microphoneStream, systemAudioStream, videoStream) {
     if (this.isRecording) return;
 
     try {
+      // Store streams for recreating MediaRecorder
+      this.microphoneStream = microphoneStream;
+      this.systemAudioStream = systemAudioStream;
+      this.videoStream = videoStream;
+
       // Create audio context to mix streams
       this.audioContext = new AudioContext({ sampleRate: 48000 });
 
@@ -40,53 +51,94 @@ class ScreenRecorder {
 
       this.combinedStream = new MediaStream([...audioTracks, ...videoTracks]);
 
-      // Start recording with WebM format (Video + Audio)
-      this.mediaRecorder = new MediaRecorder(this.combinedStream, {
-        mimeType: 'video/webm;codecs=vp9,opus'
-      });
-
       this.recordedChunks = [];
       this.isRecording = true;
+      this.chunkNumber = 0;
 
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          this.recordedChunks.push(event.data);
-        }
-      };
+      // Create initial MediaRecorder
+      this.createMediaRecorder();
 
-      this.mediaRecorder.onstop = () => {
-        this.saveRecording();
-      };
+      // Set up 30-second chunk interval
+      this.chunkInterval = setInterval(() => {
+        this.saveCurrentChunk();
+      }, 30000); // 30 seconds
 
-      this.mediaRecorder.start(1000); // Collect data every second
-      console.log('Screen recording started');
+      console.log('Screen recording started with 30-second chunks');
     } catch (error) {
       console.error('Error starting recording:', error);
       throw error;
     }
   }
 
+  createMediaRecorder() {
+    // Start recording with WebM format
+    this.mediaRecorder = new MediaRecorder(this.combinedStream, {
+      mimeType: 'video/webm;codecs=vp9,opus'
+    });
+
+    this.recordingStartTime = Date.now();
+
+    this.mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        this.recordedChunks.push(event.data);
+      }
+    };
+
+    this.mediaRecorder.onstop = async () => {
+      await this.processSaveChunk();
+      
+      // If still recording, create new MediaRecorder for next chunk
+      if (this.isRecording) {
+        this.recordedChunks = [];
+        this.createMediaRecorder();
+      }
+    };
+
+    this.mediaRecorder.start(1000); // Collect data every second
+  }
+
   stopRecording() {
     if (!this.isRecording || !this.mediaRecorder) return;
 
-    this.mediaRecorder.stop();
+    // Clear chunk interval
+    if (this.chunkInterval) {
+      clearInterval(this.chunkInterval);
+      this.chunkInterval = null;
+    }
+
     this.isRecording = false;
+    
+    // Stop will trigger onstop which saves the final chunk
+    if (this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop();
+    }
+    
     console.log('Recording stopped');
   }
 
-  async saveRecording() {
+  async saveCurrentChunk() {
+    if (!this.isRecording || !this.mediaRecorder) return;
+
+    // Stop current MediaRecorder (onstop will handle save and restart)
+    if (this.mediaRecorder.state === 'recording') {
+      this.mediaRecorder.stop();
+    }
+  }
+
+  async processSaveChunk() {
     if (this.recordedChunks.length === 0) {
       console.log('No chunks to save');
       return;
     }
 
     try {
-      // Create WebM blob
+      // Create WebM blob from current chunks
       const blob = new Blob(this.recordedChunks, { type: 'video/webm' });
-
-      // Generate filename
+      
+      // Generate filename with chunk number
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `screen_recording_${timestamp}.webm`;
+      this.chunkNumber++;
+      const filename = `screen_recording_${timestamp}_chunk_${this.chunkNumber}.webm`;
 
       // Convert blob to array buffer for saving
       const arrayBuffer = await blob.arrayBuffer();
@@ -95,18 +147,33 @@ class ScreenRecorder {
       // Send to main process to save
       window.electronAPI.saveRecording(uint8Array, filename);
 
-      console.log('Recording saved:', filename);
+      const durationSeconds = ((Date.now() - this.recordingStartTime) / 1000).toFixed(1);
+      console.log(`Chunk ${this.chunkNumber} saved: ${filename} (${durationSeconds}s)`);
     } catch (error) {
-      console.error('Error saving recording:', error);
-      alert('Error saving recording: ' + error.message);
-    } finally {
-      // Cleanup
-      this.recordedChunks = [];
-      if (this.audioContext) {
-        this.audioContext.close();
-        this.audioContext = null;
-      }
+      console.error('Error saving chunk:', error);
+      alert('Error saving chunk: ' + error.message);
     }
+  }
+
+  cleanup() {
+    // Clear interval
+    if (this.chunkInterval) {
+      clearInterval(this.chunkInterval);
+      this.chunkInterval = null;
+    }
+
+    // Cleanup audio context
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+
+    this.recordedChunks = [];
+    this.chunkNumber = 0;
+    this.microphoneStream = null;
+    this.systemAudioStream = null;
+    this.videoStream = null;
+    this.combinedStream = null;
   }
 }
 
@@ -117,12 +184,21 @@ class AudioRecorder {
     this.isRecording = false;
     this.combinedStream = null;
     this.audioContext = null;
+    this.chunkInterval = null;
+    this.chunkNumber = 0;
+    this.recordingStartTime = null;
+    this.microphoneStream = null;
+    this.systemAudioStream = null;
   }
 
   async startRecording(microphoneStream, systemAudioStream) {
     if (this.isRecording) return;
 
     try {
+      // Store streams for recreating MediaRecorder
+      this.microphoneStream = microphoneStream;
+      this.systemAudioStream = systemAudioStream;
+
       // Create audio context to mix streams
       this.audioContext = new AudioContext({ sampleRate: 48000 });
 
@@ -148,41 +224,81 @@ class AudioRecorder {
 
       this.combinedStream = destination.stream;
 
-      // Start recording with WebM format
-      this.mediaRecorder = new MediaRecorder(this.combinedStream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
-
       this.audioChunks = [];
       this.isRecording = true;
+      this.chunkNumber = 0;
 
-      this.mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          this.audioChunks.push(event.data);
-        }
-      };
+      // Create initial MediaRecorder
+      this.createMediaRecorder();
 
-      this.mediaRecorder.onstop = () => {
-        this.saveRecording();
-      };
+      // Set up 30-second chunk interval
+      this.chunkInterval = setInterval(() => {
+        this.saveCurrentChunk();
+      }, 30000); // 30 seconds
 
-      this.mediaRecorder.start(1000); // Collect data every second
-      console.log('Audio recording started');
+      console.log('Audio recording started with 30-second chunks');
     } catch (error) {
       console.error('Error starting recording:', error);
       throw error;
     }
   }
 
+  createMediaRecorder() {
+    // Start recording with WebM format
+    this.mediaRecorder = new MediaRecorder(this.combinedStream, {
+      mimeType: 'audio/webm;codecs=opus'
+    });
+
+    this.recordingStartTime = Date.now();
+
+    this.mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        this.audioChunks.push(event.data);
+      }
+    };
+
+    this.mediaRecorder.onstop = async () => {
+      await this.processSaveChunk();
+      
+      // If still recording, create new MediaRecorder for next chunk
+      if (this.isRecording) {
+        this.audioChunks = [];
+        this.createMediaRecorder();
+      }
+    };
+
+    this.mediaRecorder.start(1000); // Collect data every second
+  }
+
   stopRecording() {
     if (!this.isRecording || !this.mediaRecorder) return;
 
-    this.mediaRecorder.stop();
+    // Clear chunk interval
+    if (this.chunkInterval) {
+      clearInterval(this.chunkInterval);
+      this.chunkInterval = null;
+    }
+
     this.isRecording = false;
+    
+    // Stop will trigger onstop which saves the final chunk
+    if (this.mediaRecorder.state !== 'inactive') {
+      this.mediaRecorder.stop();
+    }
+    
     console.log('Recording stopped');
   }
 
-  async saveRecording() {
+  async saveCurrentChunk() {
+    if (!this.isRecording || !this.mediaRecorder) return;
+
+    // Stop current MediaRecorder (onstop will handle save and restart)
+    if (this.mediaRecorder.state === 'recording') {
+      this.mediaRecorder.stop();
+    }
+  }
+
+  async processSaveChunk() {
     if (this.audioChunks.length === 0) {
       console.log('No audio chunks to save');
       return;
@@ -197,9 +313,10 @@ class AudioRecorder {
       const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
       const wavBlob = this.audioBufferToWav(audioBuffer);
 
-      // Generate filename
+      // Generate filename with chunk number
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `audio_recording_${timestamp}.wav`;
+      this.chunkNumber++;
+      const filename = `audio_recording_${timestamp}_chunk_${this.chunkNumber}.wav`;
 
       // Convert blob to array buffer for saving
       const wavArrayBuffer = await wavBlob.arrayBuffer();
@@ -208,17 +325,11 @@ class AudioRecorder {
       // Send to main process to save
       window.electronAPI.saveRecording(uint8Array, filename);
 
-      console.log('Recording saved:', filename);
+      const durationSeconds = ((Date.now() - this.recordingStartTime) / 1000).toFixed(1);
+      console.log(`Chunk ${this.chunkNumber} saved: ${filename} (${durationSeconds}s)`);
     } catch (error) {
-      console.error('Error saving recording:', error);
-      alert('Error saving recording: ' + error.message);
-    } finally {
-      // Cleanup
-      this.audioChunks = [];
-      if (this.audioContext) {
-        this.audioContext.close();
-        this.audioContext = null;
-      }
+      console.error('Error saving chunk:', error);
+      alert('Error saving chunk: ' + error.message);
     }
   }
 
@@ -261,6 +372,26 @@ class AudioRecorder {
     }
 
     return new Blob([arrayBuffer], { type: 'audio/wav' });
+  }
+
+  cleanup() {
+    // Clear interval
+    if (this.chunkInterval) {
+      clearInterval(this.chunkInterval);
+      this.chunkInterval = null;
+    }
+
+    // Cleanup audio context
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+
+    this.audioChunks = [];
+    this.chunkNumber = 0;
+    this.microphoneStream = null;
+    this.systemAudioStream = null;
+    this.combinedStream = null;
   }
 }
 
@@ -311,7 +442,7 @@ function updateStatus(element, isConnected, label) {
 // Update record status display
 function updateRecordStatus(isRecording) {
   if (isRecording) {
-    recordStatus.textContent = 'Recording: Active';
+    recordStatus.textContent = 'Recording: Active (30s chunks)';
     recordStatus.className = 'status connected';
     recordBtn.textContent = 'Stop Recording';
   } else {
@@ -343,14 +474,13 @@ async function start() {
       },
       video: false
     });
-
     updateStatus(micStatus, true, 'Microphone');
 
     // Enable loopback audio
     await window.electronAPI.enableLoopbackAudio();
 
     if (mode === 'screen') {
-      // Audio + Screen mode: Get display media with video
+      // Audio + Screen mode
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
         audio: {
           echoCancellation: false,
@@ -361,14 +491,12 @@ async function start() {
         video: true
       });
 
-      // Disable loopback audio after getting stream
       await window.electronAPI.disableLoopbackAudio();
-
       systemAudioStream = displayStream;
       updateStatus(speakerStatus, true, 'Screen & System Audio');
       currentRecorder = screenRecorder;
     } else {
-      // Audio Only mode: Get display media for system audio only
+      // Audio Only mode
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
         audio: {
           echoCancellation: false,
@@ -379,7 +507,6 @@ async function start() {
         video: true
       });
 
-      // Disable loopback audio after getting stream
       await window.electronAPI.disableLoopbackAudio();
 
       // Remove video tracks for audio-only mode
@@ -394,9 +521,7 @@ async function start() {
       currentRecorder = audioRecorder;
     }
 
-    // Enable record button
     recordBtn.disabled = false;
-
     console.log(`${mode === 'screen' ? 'Screen' : 'Audio'} streams started successfully`);
   } catch (error) {
     console.error('Error starting streams:', error);
@@ -420,12 +545,16 @@ function stop() {
     updateRecordStatus(false);
   }
 
+  // Cleanup recorders
+  if (currentRecorder) {
+    currentRecorder.cleanup();
+  }
+
   // Stop and clean up streams
   if (microphoneStream) {
     microphoneStream.getTracks().forEach(t => t.stop());
     microphoneStream = null;
   }
-
   if (systemAudioStream) {
     systemAudioStream.getTracks().forEach(t => t.stop());
     systemAudioStream = null;
@@ -444,7 +573,6 @@ async function toggleRecording() {
       alert('Please start streams first!');
       return;
     }
-
     if (!currentRecorder) {
       alert('Please start streams first!');
       return;
@@ -453,10 +581,8 @@ async function toggleRecording() {
     try {
       const mode = recordingMode.value;
       if (mode === 'screen') {
-        // Screen recording mode
         await screenRecorder.startRecording(microphoneStream, systemAudioStream, systemAudioStream);
       } else {
-        // Audio only mode
         await audioRecorder.startRecording(microphoneStream, systemAudioStream);
       }
       updateRecordStatus(true);
@@ -478,9 +604,9 @@ recordBtn.addEventListener('click', toggleRecording);
 // Listen for save recording responses
 window.electronAPI.onSaveRecordingResponse((response) => {
   if (response.success) {
-    alert(`Recording saved successfully: ${response.filename}`);
+    console.log(`✓ Chunk saved: ${response.filename}`);
   } else {
-    alert(`Failed to save recording: ${response.error}`);
+    console.error(`✗ Failed to save chunk: ${response.error}`);
   }
 });
 
@@ -489,4 +615,3 @@ updateMicSelect();
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', stop);
-

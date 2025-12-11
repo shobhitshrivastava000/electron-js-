@@ -1,2 +1,5 @@
 node_modules/
 recordings/
+dist/
+.DS_Store
+.env
