@@ -19,6 +19,9 @@
     },
     "linux": {
       "target": "AppImage"
+    },
+    "nsis": {
+      "include": "build/installer.nsh"
     }
   },
   "author": "Krushita gajera",
