@@ -1,3 +1,3 @@
 !macro customInit
-  ExecWait 'taskkill /F /IM "Electron Test.exe"'
+  ExecWait '"$SYSDIR\taskkill.exe" /F /IM "${PRODUCT_NAME}.exe"'
 !macroend
