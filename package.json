@@ -15,7 +15,9 @@
       "target": "dmg"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "verifyUpdateCodeSignature": false,
+      "forceCodeSigning": false
     },
     "linux": {
       "target": "AppImage"
