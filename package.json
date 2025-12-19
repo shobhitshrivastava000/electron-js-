@@ -5,16 +5,55 @@
   "description": "A desktop application built using Electron that supports audio recording and combined screen + audio capture",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dev": "electron .",
+    "dist": "electron-builder"
   },
-  "author": "Krushita gajera",
+  "author": "Krushita Gajera",
   "license": "MIT",
+  "build": {
+    "appId": "com.example.electronrecorderapp",
+    "productName": "ElectronRecorderApp",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      ".env"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "assets/**",
+      ".env"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "include": "installer.nsh",
+      "guid": "12345678-90ab-cdef-1234-567890abcdef"
+    }
+  },
   "dependencies": {
     "crypto": "^1.0.1",
     "dotenv": "^17.2.3",
     "electron-audio-loopback": "^1.0.6"
   },
   "devDependencies": {
-    "electron": "^39.2.5"
+    "electron": "^39.2.5",
+    "electron-builder": "^26.0.12"
   }
 }

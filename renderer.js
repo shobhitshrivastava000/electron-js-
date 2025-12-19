@@ -1,3 +1,5 @@
+const chunkStorage = new Map();
+
 class ScreenRecorder {
   constructor() {
     this.mediaRecorder = null;
@@ -118,6 +120,29 @@ class ScreenRecorder {
     console.log("Recording stopped");
   }
 
+  pauseRecording() {
+    if (this.mediaRecorder && this.mediaRecorder.state === "recording") {
+      this.mediaRecorder.pause();
+      // Clear chunk interval while paused
+      if (this.chunkInterval) {
+        clearInterval(this.chunkInterval);
+        this.chunkInterval = null;
+      }
+      console.log("Screen recording paused");
+    }
+  }
+
+  resumeRecording() {
+    if (this.mediaRecorder && this.mediaRecorder.state === "paused") {
+      this.mediaRecorder.resume();
+      // Restart chunk interval
+      this.chunkInterval = setInterval(() => {
+        this.saveCurrentChunk();
+      }, 30000);
+      console.log("Screen recording resumed");
+    }
+  }
+
   async saveCurrentChunk() {
     if (!this.isRecording || !this.mediaRecorder) return;
 
@@ -142,19 +167,15 @@ class ScreenRecorder {
       this.chunkNumber++;
       const filename = `screen_recording_${timestamp}_chunk_${this.chunkNumber}.webm`;
 
-      // Convert blob to array buffer for saving
-      const arrayBuffer = await blob.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-
-      // Send to main process to save
-      window.electronAPI.saveRecording(uint8Array, filename);
+      // Store in global memory map and queue for upload (No local disk save)
+      uploadManager.queueMemoryUpload(blob, filename);
 
       const durationSeconds = (
         (Date.now() - this.recordingStartTime) /
         1000
       ).toFixed(1);
       console.log(
-        `Chunk ${this.chunkNumber} saved: ${filename} (${durationSeconds}s)`
+        `Chunk ${this.chunkNumber} queued in memory: ${filename} (${durationSeconds}s)`
       );
     } catch (error) {
       console.error("Error saving chunk:", error);
@@ -298,6 +319,29 @@ class AudioRecorder {
     console.log("Recording stopped");
   }
 
+  pauseRecording() {
+    if (this.mediaRecorder && this.mediaRecorder.state === "recording") {
+      this.mediaRecorder.pause();
+      // Clear chunk interval while paused
+      if (this.chunkInterval) {
+        clearInterval(this.chunkInterval);
+        this.chunkInterval = null;
+      }
+      console.log("Audio recording paused");
+    }
+  }
+
+  resumeRecording() {
+    if (this.mediaRecorder && this.mediaRecorder.state === "paused") {
+      this.mediaRecorder.resume();
+      // Restart chunk interval
+      this.chunkInterval = setInterval(() => {
+        this.saveCurrentChunk();
+      }, 30000);
+      console.log("Audio recording resumed");
+    }
+  }
+
   async saveCurrentChunk() {
     if (!this.isRecording || !this.mediaRecorder) return;
 
@@ -327,19 +371,15 @@ class AudioRecorder {
       this.chunkNumber++;
       const filename = `audio_recording_${timestamp}_chunk_${this.chunkNumber}.wav`;
 
-      // Convert blob to array buffer for saving
-      const wavArrayBuffer = await wavBlob.arrayBuffer();
-      const uint8Array = new Uint8Array(wavArrayBuffer);
-
-      // Send to main process to save
-      window.electronAPI.saveRecording(uint8Array, filename);
+      // Store in global memory map and queue for upload (No local disk save)
+      uploadManager.queueMemoryUpload(wavBlob, filename);
 
       const durationSeconds = (
         (Date.now() - this.recordingStartTime) /
         1000
       ).toFixed(1);
       console.log(
-        `Chunk ${this.chunkNumber} saved: ${filename} (${durationSeconds}s)`
+        `Chunk ${this.chunkNumber} queued in memory: ${filename} (${durationSeconds}s)`
       );
     } catch (error) {
       console.error("Error saving chunk:", error);
@@ -412,7 +452,376 @@ class AudioRecorder {
   }
 }
 
+// Network Quality Monitor
+function getNetworkQuality() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!connection) return 'unknown';
+  // console.log("Current Quality:", connection.effectiveType);
+  return connection.effectiveType; // 'slow-2g', '2g', '3g', '4g'
+}
+
+// --- Auth Manager (PKCE) ---
+const AUTH_CONFIG = {
+  // TODO: FILL THESE IN WITH YOUR COGNITO DETAILS
+  domain: "https://your-domain.auth.us-east-1.amazoncognito.com",
+  clientId: "YOUR_COGNITO_CLIENT_ID",
+  redirectUri: "electron-recorder://auth/callback",
+  region: "us-east-1",
+  scope: "openid profile email"
+};
+
+class AuthManager {
+  constructor() {
+    this.accessToken = null;
+    this.idToken = null;
+    this.refreshToken = null;
+    this.verifier = null;
+
+    // Listen for deep links from main process
+    if (window.electronAPI && window.electronAPI.onDeepLink) {
+      window.electronAPI.onDeepLink(async (data) => {
+        console.log("Renderer received deep link:", data);
+
+        // Handle Auth Callback
+        if (data.pathname === "//auth/callback" || data.pathname === "auth/callback") {
+          if (data.params.code) {
+            await this.exchangeCodeForTokens(data.params.code);
+          }
+        }
+
+        // Handle "Record" action (e.g. from web app)
+        if (data.pathname === "//record" || data.pathname === "record") {
+          console.log("Record request received via deep link");
+          // If not logged in, trigger login first
+          if (!this.isAuthenticated()) {
+            await this.startLogin();
+          } else {
+            // Ready to record!
+            this.showReadyState();
+          }
+        }
+      });
+    }
+  }
+
+  isAuthenticated() {
+    // Basic check - in real app check expiry
+    return !!this.accessToken;
+  }
+
+  showReadyState() {
+    alert("Authenticated and Ready to Record!");
+    // Update UI to show logged in state
+    const statusEl = document.getElementById('recordStatus');
+    if (statusEl) statusEl.textContent = "Ready (Logged In)";
+  }
+
+  async startLogin() {
+    // 1. Generate PKCE
+    const { verifier, challenge } = await this.generatePKCE();
+    this.verifier = verifier;
+
+    // 2. Build URL
+    const url = `${AUTH_CONFIG.domain}/oauth2/authorize?` +
+      `client_id=${AUTH_CONFIG.clientId}&` +
+      `response_type=code&` +
+      `scope=${encodeURIComponent(AUTH_CONFIG.scope)}&` +
+      `redirect_uri=${encodeURIComponent(AUTH_CONFIG.redirectUri)}&` +
+      `code_challenge_method=S256&` +
+      `code_challenge=${challenge}`;
+
+    // 3. Open in System Browser
+    console.log("Opening auth url:", url);
+    // We can't use shell directly in renderer usually, but window.open works for external if config allows
+    // Or simpler: just print it for now or assume main process handles 'new-window'
+    // Ideally usage: window.open(url) -> which electron intercepts
+    window.open(url, '_blank');
+  }
+
+  async exchangeCodeForTokens(code) {
+    if (!this.verifier) {
+      console.error("No PKCE verifier found. Did you start the login flow?");
+      return;
+    }
+
+    try {
+      const body = new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: AUTH_CONFIG.clientId,
+        code: code,
+        redirect_uri: AUTH_CONFIG.redirectUri,
+        code_verifier: this.verifier
+      });
+
+      const response = await fetch(`${AUTH_CONFIG.domain}/oauth2/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body
+      });
+
+      if (!response.ok) {
+        const txt = await response.text();
+        throw new Error(`Token exchange failed: ${txt}`);
+      }
+
+      const data = await response.json();
+      this.accessToken = data.access_token;
+      this.idToken = data.id_token;
+      this.refreshToken = data.refresh_token; // Save this securely!
+
+      console.log("Login Successful!", data);
+      this.showReadyState();
+
+    } catch (err) {
+      console.error("Auth Error:", err);
+      alert("Authentication Failed: " + err.message);
+    }
+  }
+
+  // --- PKCE Helpers ---
+  async generatePKCE() {
+    const verifier = this.generateRandomString(128);
+    const challenge = await this.pkceChallengeFromVerifier(verifier);
+    return { verifier, challenge };
+  }
+
+  generateRandomString(length) {
+    let text = "";
+    const possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    for (let i = 0; i < length; i++) {
+      text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+  }
+
+  async pkceChallengeFromVerifier(v) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(v);
+    const result = await window.crypto.subtle.digest('SHA-256', data);
+    return this.base64URLEncode(result);
+  }
+
+  base64URLEncode(buffer) {
+    return btoa(String.fromCharCode(...new Uint8Array(buffer)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  }
+}
+
+// ---------------------------
+
+class UploadManager {
+  constructor() {
+    this.queue = []; // Use in-memory queue, no localStorage for queue persistence
+    this.isProcessing = false;
+    this.uploadUrl = "https://your-server-endpoint.com/upload"; // REPLACE THIS
+
+    // Bind methods
+    this.processQueue = this.processQueue.bind(this);
+
+    // Listen for online status
+    window.addEventListener("online", () => {
+      console.log("Network restored. Processing upload queue...");
+
+      // Hide warning if it was shown
+      const warningEl = document.getElementById('networkWarning');
+      if (warningEl) warningEl.style.display = 'none';
+
+      this.processQueue();
+    });
+
+    // Listen for offline status
+    window.addEventListener("offline", () => {
+      console.log("Network went offline.");
+
+      // Show warning if recording
+      const warningEl = document.getElementById('networkWarning');
+      if (currentRecorder && currentRecorder.isRecording) {
+        if (warningEl) {
+          // Optional: Update text to be specific to Offline
+          const title = warningEl.querySelector('h4');
+          const msg = warningEl.querySelector('p');
+          if (title) title.textContent = "⚠️ No Internet Connection";
+          if (msg) msg.textContent = "You are offline. Uploads are paused. Record locally or pause?";
+
+          warningEl.style.display = 'block';
+        }
+      }
+    });
+
+    // Listen for network quality changes
+    const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (connection) {
+      connection.addEventListener('change', () => {
+        console.log(`Network quality changed to: ${connection.effectiveType}`);
+        // Treat '3g' (which can be slow) as weak too, or just strictly '2g'?
+        // User says "when... 3g, then only i am getting popup" implying they WANT it on 3g? 
+        // Or that they ARE getting it on 3g and that's wrong?
+        // "when the internet network connection is 3g , then only i am getting the popup"
+        // This phrasing usually means "I only see it on 3g [and i want to see it on others too]" OR "It is happening on 3g [confirming behavior]"
+        // But standard '3g' is often considered "usable".
+        // However, usually users want stricter checks.
+        // Let's assume they want to include '3g' in the "Weak" definition if they are testing with "Slow 3G".
+
+        // Wait, "Slow 3G" in dev tools often reports as '2g' or '3g' effective type.
+        // If the user currently sees it ONLY on 3g, that's weird because the code is:
+        // const isWeak = connection.effectiveType === 'slow-2g' || connection.effectiveType === '2g';
+
+        // Maybe they mean "I WANT it to show on 3g too"? 
+        // Let's expand the definition of weak to include '3g' to be safe and more responsive.
+
+        const isWeak = connection.effectiveType === 'slow-2g' ||
+          connection.effectiveType === '2g' ||
+          connection.effectiveType === '3g';
+
+        // 1. Handle Active Recording Alert
+        const warningEl = document.getElementById('networkWarning');
+        if (isWeak && currentRecorder && currentRecorder.isRecording) {
+          // Show warning popup
+          if (warningEl) warningEl.style.display = 'block';
+        } else {
+          // Hide if improved (now strictly 4g is considered "Good")
+          if (warningEl && !isWeak) warningEl.style.display = 'none';
+        }
+
+        // 2. Handle Uploads
+        if (!isWeak) {
+          this.processQueue();
+        } else {
+          console.log("Network weak - pausing uploads to prevent congestion");
+        }
+      });
+    }
+
+    // Process on init in case we have leftovers
+    if (navigator.onLine) {
+      this.processQueue();
+    }
+  }
+
+  queueMemoryUpload(blob, filename) {
+    const id = Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9);
+    chunkStorage.set(id, blob);
+
+    const item = {
+      id: id,
+      filename: filename,
+      addedAt: new Date().toISOString(),
+      attempts: 0
+    };
+
+    this.queue.push(item);
+    console.log(`Added ${filename} to memory upload queue. Pending: ${this.queue.length}`);
+    this.processQueue();
+  }
+
+  removeFromQueue(id) {
+    this.queue = this.queue.filter(item => item.id !== id);
+    // this.saveQueue(); // No persistence
+  }
+
+  saveQueue() {
+    // localStorage.setItem("uploadQueue", JSON.stringify(this.queue));
+    // Disabled persistence as we are using in-memory blobs which cannot be JSON serialized
+  }
+
+  async processQueue() {
+    if (this.isProcessing || this.queue.length === 0) return;
+
+    // 1. Check Offline
+    if (!navigator.onLine) {
+      console.log("Offline: Uploads paused.");
+      return;
+    }
+
+    // 2. Check Weak Connection (New Feature)
+    const quality = getNetworkQuality();
+    if (quality === 'slow-2g' || quality === '2g') {
+      console.log(`Network too weak for upload (${quality}). Queuing for later.`);
+      return;
+    }
+
+    this.isProcessing = true;
+
+    try {
+      // Process one by one (FIFO)
+      // We look at the first item
+      const item = this.queue[0];
+
+      console.log(`Attempting to upload: ${item.filename} (Attempt ${item.attempts + 1})`);
+
+      try {
+        // 1. Retrieve Blob from memory
+        const blob = chunkStorage.get(item.id);
+
+        if (!blob) {
+          throw new Error("File data not found in memory (app may have been reloaded)");
+        }
+
+        // 3. Upload
+        const formData = new FormData();
+        formData.append("file", blob, item.filename);
+
+        // Mock upload delay for demonstration if URL is dummy
+        if (this.uploadUrl.includes("your-server-endpoint")) {
+          await new Promise(r => setTimeout(r, 1000));
+          console.log("Simulated upload success (Update URL in renderer.js)");
+        } else {
+          const response = await fetch(this.uploadUrl, {
+            method: "POST",
+            body: formData,
+          });
+          if (!response.ok) throw new Error(`Server returned ${response.status}`);
+        }
+
+        console.log(`Successfully uploaded: ${item.filename}`);
+
+        // Clean up memory
+        chunkStorage.delete(item.id);
+
+
+        this.removeFromQueue(item.id);
+
+      } catch (error) {
+        console.error(`Upload failed for ${item.filename}:`, error);
+        item.attempts++;
+        this.saveQueue();
+
+        // If file not found (maybe deleted by user?), remove it
+        if (error.message.includes("File not found")) {
+          console.warn("File missing from disk, removing from queue.");
+          this.removeFromQueue(item.id);
+        } else {
+          // Wait a bit before retrying or moving to next?
+          // For now, we'll break the loop and try again later/on online event
+          // to avoid spamming errors
+          this.isProcessing = false;
+          return;
+        }
+      }
+
+      // Continue to next item
+      if (this.queue.length > 0) {
+        // Small delay between uploads
+        setTimeout(() => {
+          this.isProcessing = false;
+          this.processQueue();
+        }, 500);
+        return; // Return so we don't clear isProcessing immediately below
+      }
+
+    } catch (globalError) {
+      console.error("Queue processing error:", globalError);
+    }
+
+    this.isProcessing = false;
+  }
+}
+
 // Global variables
+let uploadManager = new UploadManager();
+let authManager = new AuthManager(); // Init Auth
 let screenRecorder = new ScreenRecorder();
 let audioRecorder = new AudioRecorder();
 let currentRecorder = null;
@@ -429,6 +838,7 @@ const recordStatus = document.getElementById("recordStatus");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
 const recordBtn = document.getElementById("recordBtn");
+const pauseBtn = document.getElementById("pauseBtn");
 
 // Populate microphone select dropdown
 function updateMicSelect() {
@@ -458,15 +868,25 @@ function updateStatus(element, isConnected, label) {
 }
 
 // Update record status display
-function updateRecordStatus(isRecording) {
+function updateRecordStatus(isRecording, isPaused = false) {
   if (isRecording) {
-    recordStatus.textContent = "Recording: Active";
-    recordStatus.className = "status connected";
+    if (isPaused) {
+      recordStatus.textContent = "Recording: Paused";
+      recordStatus.className = "status connected"; // Keep green or maybe yellow? keeping connected style for now
+      pauseBtn.textContent = "Resume";
+    } else {
+      recordStatus.textContent = "Recording: Active";
+      recordStatus.className = "status connected";
+      pauseBtn.textContent = "Pause";
+    }
     recordBtn.textContent = "Stop Recording";
+    pauseBtn.disabled = false;
   } else {
     recordStatus.textContent = "Recording: Stopped";
     recordStatus.className = "status disconnected";
     recordBtn.textContent = "Start Recording";
+    pauseBtn.textContent = "Pause";
+    pauseBtn.disabled = true;
   }
 }
 
@@ -578,6 +998,10 @@ function stop() {
     currentRecorder.cleanup();
   }
 
+  // Reset pause button
+  pauseBtn.textContent = "Pause";
+  pauseBtn.disabled = true;
+
   // Stop and clean up streams
   if (microphoneStream) {
     microphoneStream.getTracks().forEach((t) => t.stop());
@@ -621,7 +1045,7 @@ async function toggleRecording() {
         // Audio only mode
         await audioRecorder.startRecording(microphoneStream, systemAudioStream);
       }
-      updateRecordStatus(true);
+      updateRecordStatus(true, false);
     } catch (error) {
       console.error("Error starting recording:", error);
       alert("Error starting recording: " + error.message);
@@ -632,19 +1056,44 @@ async function toggleRecording() {
   }
 }
 
+// Toggle pause
+function togglePause() {
+  if (!currentRecorder || !currentRecorder.isRecording) return;
+
+  if (currentRecorder.mediaRecorder.state === "recording") {
+    currentRecorder.pauseRecording();
+    updateRecordStatus(true, true);
+  } else if (currentRecorder.mediaRecorder.state === "paused") {
+    currentRecorder.resumeRecording();
+    updateRecordStatus(true, false);
+  }
+}
+
 // Event listeners
 startBtn.addEventListener("click", start);
 stopBtn.addEventListener("click", stop);
 recordBtn.addEventListener("click", toggleRecording);
+pauseBtn.addEventListener("click", togglePause);
+document.getElementById("pauseOnWeakBtn").addEventListener("click", () => {
+  togglePause();
+  document.getElementById("networkWarning").style.display = 'none';
+});
 
 // Listen for save recording responses
-window.electronAPI.onSaveRecordingResponse((response) => {
-  if (response.success) {
-    console.log(`Chunk saved: ${response.filename}`);
-  } else {
-    console.error(`Failed to save chunk: ${response.error}`);
-  }
-});
+// Listen for save recording responses - DISABLED (Using memory storage)
+// window.electronAPI.onSaveRecordingResponse((response) => {
+//   if (response.success) {
+//     console.log(`Chunk saved: ${response.filename}`);
+
+//     // Add to upload queue for background uploading
+//     if (response.filePath) {
+//       uploadManager.addToQueue(response);
+//     }
+
+//   } else {
+//     console.error(`Failed to save chunk: ${response.error}`);
+//   }
+// });
 
 // Initialize
 updateMicSelect();

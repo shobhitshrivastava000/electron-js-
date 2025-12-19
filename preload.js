@@ -11,4 +11,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
       callback(response)
     );
   },
+  readRecordingFile: (filePath) => ipcRenderer.invoke("read-recording-file", filePath),
+  deleteRecordingFile: (filePath) => ipcRenderer.invoke("delete-recording-file", filePath),
+  onDeepLink: (callback) => {
+    ipcRenderer.on('deep-link-action', (event, data) => callback(data));
+  },
 });

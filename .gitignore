@@ -1,2 +1,7 @@
 node_modules/
 recordings/
+.env
+dist/
+out/
+*.log
+.DS_Store
