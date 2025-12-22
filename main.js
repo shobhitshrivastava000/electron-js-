@@ -55,10 +55,10 @@ function createWindow() {
 // 1. Register Protocol
 if (process.defaultApp) {
   if (process.argv.length >= 2) {
-    app.setAsDefaultProtocolClient('electron-recorder', process.execPath, [path.resolve(process.argv[1])]);
+    app.setAsDefaultProtocolClient('plannerpal-recorder', process.execPath, [path.resolve(process.argv[1])]);
   }
 } else {
-  app.setAsDefaultProtocolClient('electron-recorder');
+  app.setAsDefaultProtocolClient('plannerpal-recorder');
 }
 
 // 2. Handle Single Instance Lock
@@ -75,8 +75,8 @@ if (!gotTheLock) {
     }
 
     // Windows: Deep link url is likely inside commandLine array
-    // Look for argument starting with electron-recorder://
-    const url = commandLine.find(arg => arg.startsWith('electron-recorder://'));
+    // Look for argument starting with plannerpal-recorder://
+    const url = commandLine.find(arg => arg.startsWith('plannerpal-recorder://'));
     if (url) {
       handleDeepLink(url);
     }
@@ -87,7 +87,7 @@ if (!gotTheLock) {
     createWindow();
 
     // Check argv for cold start URL
-    const url = process.argv.find(arg => arg.startsWith('electron-recorder://'));
+    const url = process.argv.find(arg => arg.startsWith('plannerpal-recorder://'));
     if (url) {
       handleDeepLink(url);
     }

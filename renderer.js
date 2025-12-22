@@ -460,14 +460,13 @@ function getNetworkQuality() {
   return connection.effectiveType; // 'slow-2g', '2g', '3g', '4g'
 }
 
-// --- Auth Manager (PKCE) ---
 const AUTH_CONFIG = {
-  // TODO: FILL THESE IN WITH YOUR COGNITO DETAILS
   domain: "https://your-domain.auth.us-east-1.amazoncognito.com",
   clientId: "YOUR_COGNITO_CLIENT_ID",
-  redirectUri: "electron-recorder://auth/callback",
+  redirectUri: "plannerpal-recorder://auth/callback",
   region: "us-east-1",
-  scope: "openid profile email"
+  scope: "openid profile email",
+  backendBaseUrl: "https://your-sails-app.com"
 };
 
 class AuthManager {
@@ -489,14 +488,18 @@ class AuthManager {
           }
         }
 
-        // Handle "Record" action (e.g. from web app)
+        // Handle "Record" action (Option B: Secure Handoff)
         if (data.pathname === "//record" || data.pathname === "record") {
           console.log("Record request received via deep link");
-          // If not logged in, trigger login first
-          if (!this.isAuthenticated()) {
+
+          if (data.params.code) {
+            console.log("Handoff code detected, exchanging for tokens...");
+            await this.exchangeLaunchCodeForTokens(data.params.code);
+          } else if (!this.isAuthenticated()) {
+            // Fallback to standard login if no code and not authenticated
             await this.startLogin();
           } else {
-            // Ready to record!
+            // Already logged in
             this.showReadyState();
           }
         }
@@ -536,6 +539,41 @@ class AuthManager {
     // Or simpler: just print it for now or assume main process handles 'new-window'
     // Ideally usage: window.open(url) -> which electron intercepts
     window.open(url, '_blank');
+  }
+
+  async exchangeLaunchCodeForTokens(launchCode) {
+    try {
+      const response = await fetch(`${AUTH_CONFIG.backendBaseUrl}/desktop/exchange`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Optional: Add device ID or public key ID here for proof of possession
+          // 'X-Device-Id': await this.getDeviceId() 
+        },
+        body: JSON.stringify({ code: launchCode })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.message || `Exchange failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // The backend should return Cognito tokens or your own JWTs
+      this.accessToken = data.accessToken;
+      this.idToken = data.idToken;
+      this.refreshToken = data.refreshToken;
+
+      // Securely store tokens (e.g., using Electron's safeStorage or keytar)
+      // For now, we'll keep them in memory
+      console.log("Handoff exchange successful!");
+      this.showReadyState();
+
+    } catch (err) {
+      console.error("Handoff Error:", err);
+      alert("Handoff Failed: " + err.message);
+    }
   }
 
   async exchangeCodeForTokens(code) {
